@@ -1,6 +1,7 @@
 require 'omniauth-oauth2'
 require 'openssl'
 require 'base64'
+require 'securerandom'
 
 module OmniAuth
   module Strategies
@@ -20,7 +21,9 @@ module OmniAuth
         :state,
         :prompt,
         :redirect_uri,
-        :login_hint
+        :login_hint,
+        :code_challenge,
+        :code_challenge_method
       ]
 
       def request_phase
@@ -31,6 +34,18 @@ module OmniAuth
           mobile_request = ua.downcase =~ Regexp.new(MOBILE_USER_AGENTS)
           options[:display] = mobile_request ? 'touch' : 'page'
         end
+
+        # Generate code verifier and code challenge for PKCE
+        code_verifier = SecureRandom.urlsafe_base64(64)
+        code_challenge = Base64.urlsafe_encode64(OpenSSL::Digest::SHA256.digest(code_verifier), padding: false)
+        
+        # Store the code verifier to be used during token exchange
+        session[:salesforce_code_verifier] = code_verifier
+        
+        # Add code challenge and code challenge method to the request
+        options[:code_challenge] = code_challenge
+        options[:code_challenge_method] = 'S256'
+
         super
       end
 
@@ -81,19 +96,13 @@ module OmniAuth
         })
       end
 
+      # Token exchange phase
+      def token_params
+        # Use code verifier during the token exchange phase
+        super.merge({
+          code_verifier: session[:salesforce_code_verifier]
+        })
+      end
     end
-
-    class SalesforceSandbox < OmniAuth::Strategies::Salesforce
-      default_options[:client_options][:site] = 'https://test.salesforce.com'
-    end
-
-    class DatabaseDotCom < OmniAuth::Strategies::Salesforce
-      default_options[:client_options][:site] = 'https://login.database.com'
-    end
-
-    class SalesforcePreRelease < OmniAuth::Strategies::Salesforce
-      default_options[:client_options][:site] = 'https://prerellogin.pre.salesforce.com/'
-    end
-
   end
 end
